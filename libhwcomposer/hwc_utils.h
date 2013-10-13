@@ -26,7 +26,7 @@
 #define LIKELY( exp )       (__builtin_expect( (exp) != 0, true  ))
 #define UNLIKELY( exp )     (__builtin_expect( (exp) != 0, false ))
 #define MAX_NUM_DISPLAYS 4
-#define HWC_BLIT 4
+
 //Fwrd decls
 struct hwc_context_t;
 struct framebuffer_device_t;
