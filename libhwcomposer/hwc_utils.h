@@ -33,6 +33,7 @@
 #define FINAL_TRANSFORM_MASK 0x000F
 #define MAX_NUM_DISPLAYS 4 //Yes, this is ambitious
 #define MAX_NUM_LAYERS 32
+#define HWC_BLIT 4
 
 //Fwrd decls
 struct hwc_context_t;
