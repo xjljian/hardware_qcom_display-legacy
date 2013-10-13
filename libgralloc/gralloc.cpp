@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2008, The Android Open Source Project
- * Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <cutils/properties.h>
-#include <utils/RefBase.h>
 
 #include <linux/android_pmem.h>
 
@@ -33,7 +32,6 @@
 #include "alloc_controller.h"
 
 using namespace gralloc;
-using android::sp;
 
 int fb_device_open(const hw_module_t* module, const char* name,
                    hw_device_t** device);
@@ -102,7 +100,7 @@ int gralloc_device_open(const hw_module_t* module, const char* name,
         const private_module_t* m = reinterpret_cast<const private_module_t*>(
             module);
         gpu_context_t *dev;
-        sp<IAllocController> alloc_ctrl = IAllocController::getInstance(true);
+        IAllocController* alloc_ctrl = IAllocController::getInstance(true);
         dev = new gpu_context_t(m, alloc_ctrl);
         *device = &dev->common;
         status = 0;

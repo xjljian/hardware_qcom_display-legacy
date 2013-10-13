@@ -1,6 +1,6 @@
 /*
 * Copyright (C) 2008 The Android Open Source Project
-* Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
+* Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -132,11 +132,8 @@ public:
 
     bool setTransform(const utils::eTransform& orient, const bool& rotUsed);
 
-    const utils::eTransform& getTransform();
-
     /* given a dim and w/h, set overlay dim */
-    bool setPosition(const utils::Dim& dim, int w, int h,
-                     const overlay::utils::eTransform& e);
+    bool setPosition(const utils::Dim& dim, int w, int h);
 
     /* using user_data, sets/unsets roationvalue in mdp flags */
     void setRotationFlags();
@@ -236,6 +233,13 @@ private:
 };
 
 //--------------Inlines---------------------------------
+namespace utils {
+inline bool openDev(OvFD& fd, int fbnum,
+        const char* const devpath,
+        int flags) {
+    return overlay::open(fd, fbnum, devpath, flags);
+}
+}
 namespace {
 // just a helper func for common operations x-(y+z)
 int compute(uint32_t x, uint32_t y, uint32_t z) {
@@ -467,8 +471,12 @@ inline void MdpData::reset() {
 }
 
 inline bool MdpData::close() {
+    if(-1 == mOvData.data.memory_id) return true;
     reset();
-    return mFd.close();
+    if(!mFd.close()) {
+        return false;
+    }
+    return true;
 }
 
 inline int MdpData::getSrcMemoryId() const { return mOvData.data.memory_id; }

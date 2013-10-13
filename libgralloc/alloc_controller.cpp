@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -10,7 +10,7 @@
  *     copyright notice, this list of conditions and the following
  *     disclaimer in the documentation and/or other materials provided
  *     with the distribution.
- *   * Neither the name of The Linux Foundation nor the names of its
+ *   * Neither the name of Code Aurora Forum, Inc. nor the names of its
  *     contributors may be used to endorse or promote products derived
  *     from this software without specific prior written permission.
  *
@@ -28,38 +28,23 @@
  */
 
 #include <cutils/log.h>
-#include <utils/RefBase.h>
 #include <fcntl.h>
 #include "gralloc_priv.h"
 #include "alloc_controller.h"
 #include "memalloc.h"
+#ifdef USE_ION
 #include "ionalloc.h"
+#else
 #include "pmemalloc.h"
 #include "ashmemalloc.h"
+#endif
 #include "gr.h"
 #include "comptype.h"
 
-#ifdef VENUS_COLOR_FORMAT
-#include <media/msm_media_info.h>
-#else
-#define VENUS_Y_STRIDE(args...) 0
-#define VENUS_Y_SCANLINES(args...) 0
-#define VENUS_BUFFER_SIZE(args...) 0
-#endif
+ANDROID_SINGLETON_STATIC_INSTANCE(qdutils::QCCompositionType);
 
 using namespace gralloc;
 using namespace qdutils;
-using android::sp;
-
-const int GRALLOC_HEAP_MASK  =  GRALLOC_USAGE_PRIVATE_ADSP_HEAP      |
-                                GRALLOC_USAGE_PRIVATE_UI_CONTIG_HEAP |
-                                GRALLOC_USAGE_PRIVATE_SMI_HEAP       |
-                                GRALLOC_USAGE_PRIVATE_SYSTEM_HEAP    |
-                                GRALLOC_USAGE_PRIVATE_IOMMU_HEAP     |
-                                GRALLOC_USAGE_PRIVATE_MM_HEAP        |
-                                GRALLOC_USAGE_PRIVATE_WRITEBACK_HEAP |
-                                GRALLOC_USAGE_PRIVATE_CAMERA_HEAP;
-
 
 //Common functions
 static bool canFallback(int usage, bool triedSystem)
@@ -96,8 +81,8 @@ static bool useUncached(int usage)
     return false;
 }
 
-sp<IAllocController> IAllocController::sController = NULL;
-sp<IAllocController> IAllocController::getInstance(bool useMasterHeap)
+IAllocController* IAllocController::sController = NULL;
+IAllocController* IAllocController::getInstance(bool useMasterHeap)
 {
     if(sController == NULL) {
 #ifdef USE_ION
@@ -120,8 +105,7 @@ IonController::IonController()
     mIonAlloc = new IonAlloc();
 }
 
-int IonController::allocate(alloc_data& data, int usage,
-                            int compositionType)
+int IonController::allocate(alloc_data& data, int usage)
 {
     int ionFlags = 0;
     int ret;
@@ -144,19 +128,11 @@ int IonController::allocate(alloc_data& data, int usage,
     if(usage & GRALLOC_USAGE_PRIVATE_MM_HEAP)
         ionFlags |= ION_HEAP(ION_CP_MM_HEAP_ID);
 
-    if(usage & GRALLOC_USAGE_PRIVATE_WRITEBACK_HEAP)
-        ionFlags |= ION_HEAP(ION_CP_WB_HEAP_ID);
-
     if(usage & GRALLOC_USAGE_PRIVATE_CAMERA_HEAP)
         ionFlags |= ION_HEAP(ION_CAMERA_HEAP_ID);
 
     if(usage & GRALLOC_USAGE_PRIVATE_CP_BUFFER)
         ionFlags |= ION_SECURE;
-
-    if(usage & GRALLOC_USAGE_PRIVATE_DO_NOT_MAP)
-        data.allocType  |=  private_handle_t::PRIV_FLAGS_NOT_MAPPED;
-    else
-        data.allocType  &=  ~(private_handle_t::PRIV_FLAGS_NOT_MAPPED);
 
     // if no flags are set, default to
     // SF + IOMMU heaps, so that bypass can work
@@ -168,19 +144,7 @@ int IonController::allocate(alloc_data& data, int usage,
     data.flags = ionFlags;
     ret = mIonAlloc->alloc_buffer(data);
 
-    // Fallback to CAMERA PREVIEW heap if
-    // allocation is for fb1 AND
-    // allocation from SF heap fails
-    // Reason : fb1 had to go to MDP and MDP can't use system heap
-    // TODO : don't hardcode based on 'usage'
-
-    if(ret < 0 && (usage == 6659)) {
-       ALOGW("Falling back to CAMERA_PREVIEW heap for fb allocations");
-       data.flags = ION_HEAP(ION_CAMERA_HEAP_ID);
-       ret = mIonAlloc->alloc_buffer(data);
-    }
-
-    // Fallback to system heap
+    // Fallback
     if(ret < 0 && canFallback(usage,
                               (ionFlags & ION_SYSTEM_HEAP_ID)))
     {
@@ -201,9 +165,9 @@ int IonController::allocate(alloc_data& data, int usage,
     return ret;
 }
 
-sp<IMemAlloc> IonController::getAllocator(int flags)
+IMemAlloc* IonController::getAllocator(int flags)
 {
-    sp<IMemAlloc> memalloc;
+    IMemAlloc* memalloc = NULL;
     if (flags & private_handle_t::PRIV_FLAGS_USES_ION) {
         memalloc = mIonAlloc;
     } else {
@@ -212,11 +176,8 @@ sp<IMemAlloc> IonController::getAllocator(int flags)
 
     return memalloc;
 }
-#endif
-
+#else
 //-------------- PmemKernelController-----------------------//
-//XXX: Remove - we're not using pmem anymore
-#ifndef USE_ION
 PmemKernelController::PmemKernelController()
 {
     mPmemAdspAlloc = new PmemKernelAlloc(DEVICE_PMEM_ADSP);
@@ -228,8 +189,7 @@ PmemKernelController::~PmemKernelController()
 {
 }
 
-int PmemKernelController::allocate(alloc_data& data, int usage,
-                                   int compositionType)
+int PmemKernelController::allocate(alloc_data& data, int usage)
 {
     int ret = 0;
     bool adspFallback = false;
@@ -244,7 +204,7 @@ int PmemKernelController::allocate(alloc_data& data, int usage,
         int tempFd = open(DEVICE_PMEM_SMIPOOL, O_RDWR, 0);
         if(tempFd > 0) {
             close(tempFd);
-            sp<IMemAlloc> memalloc;
+            IMemAlloc* memalloc;
             memalloc = new PmemKernelAlloc(DEVICE_PMEM_SMIPOOL);
             ret = memalloc->alloc_buffer(data);
             if(ret >= 0)
@@ -262,9 +222,9 @@ int PmemKernelController::allocate(alloc_data& data, int usage,
     return ret;
 }
 
-sp<IMemAlloc> PmemKernelController::getAllocator(int flags)
+IMemAlloc* PmemKernelController::getAllocator(int flags)
 {
-    sp<IMemAlloc> memalloc;
+    IMemAlloc* memalloc;
     if (flags & private_handle_t::PRIV_FLAGS_USES_PMEM_ADSP)
         memalloc = mPmemAdspAlloc;
     else {
@@ -288,8 +248,7 @@ PmemAshmemController::~PmemAshmemController()
 {
 }
 
-int PmemAshmemController::allocate(alloc_data& data, int usage,
-                                   int compositionType)
+int PmemAshmemController::allocate(alloc_data& data, int usage)
 {
     int ret = 0;
     data.allocType = 0;
@@ -304,7 +263,7 @@ int PmemAshmemController::allocate(alloc_data& data, int usage,
     // If ADSP or SMI is requested use the kernel controller
     if(usage & (GRALLOC_USAGE_PRIVATE_ADSP_HEAP|
                 GRALLOC_USAGE_PRIVATE_SMI_HEAP)) {
-        ret = mPmemKernelCtrl->allocate(data, usage, compositionType);
+        ret = mPmemKernelCtrl->allocate(data, usage);
         if(ret < 0)
             ALOGE("%s: Failed to allocate ADSP/SMI memory", __func__);
         else
@@ -342,9 +301,9 @@ int PmemAshmemController::allocate(alloc_data& data, int usage,
     return ret;
 }
 
-sp<IMemAlloc> PmemAshmemController::getAllocator(int flags)
+IMemAlloc* PmemAshmemController::getAllocator(int flags)
 {
-    sp<IMemAlloc> memalloc;
+    IMemAlloc* memalloc;
     if (flags & private_handle_t::PRIV_FLAGS_USES_PMEM)
         memalloc = mPmemUserspaceAlloc;
     else if (flags & private_handle_t::PRIV_FLAGS_USES_PMEM_ADSP)
@@ -359,6 +318,7 @@ sp<IMemAlloc> PmemAshmemController::getAllocator(int flags)
     return memalloc;
 }
 #endif
+
 size_t getBufferSizeAndDimensions(int width, int height, int format,
                                   int& alignedw, int &alignedh)
 {
@@ -439,7 +399,7 @@ int alloc_buffer(private_handle_t **pHnd, int w, int h, int format, int usage)
 {
     alloc_data data;
     int alignedw, alignedh;
-    android::sp<gralloc::IAllocController> sAlloc =
+    gralloc::IAllocController* sAlloc =
         gralloc::IAllocController::getInstance(false);
     data.base = 0;
     data.fd = -1;
@@ -449,14 +409,15 @@ int alloc_buffer(private_handle_t **pHnd, int w, int h, int format, int usage)
     data.uncached = useUncached(usage);
     int allocFlags = usage;
 
-    int err = sAlloc->allocate(data, allocFlags, 0);
+    int err = sAlloc->allocate(data, allocFlags);
     if (0 != err) {
         ALOGE("%s: allocate failed", __FUNCTION__);
         return -ENOMEM;
     }
 
     private_handle_t* hnd = new private_handle_t(data.fd, data.size,
-                                                 data.allocType, 0, format, alignedw, alignedh);
+                                                 data.allocType, 0, format,
+                                                 alignedw, alignedh);
     hnd->base = (int) data.base;
     hnd->offset = data.offset;
     hnd->gpuaddr = 0;
@@ -466,10 +427,10 @@ int alloc_buffer(private_handle_t **pHnd, int w, int h, int format, int usage)
 
 void free_buffer(private_handle_t *hnd)
 {
-    android::sp<gralloc::IAllocController> sAlloc =
+    gralloc::IAllocController* sAlloc =
         gralloc::IAllocController::getInstance(false);
     if (hnd && hnd->fd > 0) {
-        sp<IMemAlloc> memalloc = sAlloc->getAllocator(hnd->flags);
+        IMemAlloc* memalloc = sAlloc->getAllocator(hnd->flags);
         memalloc->free_buffer((void*)hnd->base, hnd->size, hnd->offset, hnd->fd);
     }
     if(hnd)
